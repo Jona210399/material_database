@@ -42,7 +42,7 @@ def process_entry(
 
 
 def process_entries_concurrently(
-    entries: list,
+    entries: list[ComputedStructureEntry],
 ) -> tuple[list, list]:
     with ProcessPoolExecutor() as executor:
         results = list(
@@ -57,13 +57,12 @@ def process_entries_concurrently(
 
 
 def process_entries(
-    entries: list,
+    entries: list[ComputedStructureEntry],
 ) -> tuple[list, list]:
     symmetrized_structures = []
     cifs = []
 
     for entry in tqdm(entries, desc="Processing entries"):
-        entry: ComputedStructureEntry
         symmetrized_structure, cif = process_entry(entry=entry)
         symmetrized_structures.append(symmetrized_structure)
         cifs.append(cif)

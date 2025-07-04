@@ -1,3 +1,5 @@
+from io import StringIO
+
 from pymatgen.core.structure import Structure
 from pymatgen.io.cif import CifBlock, CifParser
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer, SpacegroupOperations
@@ -109,7 +111,7 @@ def symmetrized_structure_from_cif_block(
 
 
 def symmetrized_structures_from_cif(
-    cif_path: PathLike,
+    cif_path: PathLike | StringIO,
 ) -> tuple[list[None | Structure], list[None | SymmetrizedStructure]]:
     parser = CifParser(cif_path)
     structures: list[None | Structure] = [None] * len(parser._cif.data)
@@ -147,14 +149,19 @@ def symmetrized_structures_from_cif(
     return structures, symmetrized_structures
 
 
-cif_path = "tests/files/Graphite.cif"
-structure = Structure.from_file(cif_path)
-analyzer = SpacegroupAnalyzer(structure)
-symmetrized_structure = analyzer.get_symmetrized_structure()
+def main():
+    cif_path = "tests/files/cif/Graphite.cif"
+    structure = Structure.from_file(cif_path)
+    analyzer = SpacegroupAnalyzer(structure)
+    symmetrized_structure = analyzer.get_symmetrized_structure()
 
-structures, symmetrized_structures = symmetrized_structures_from_cif(cif_path)
-print(f"Number of structures: {len(structures)}")
-print(f"Number of symmetrized structures: {len(symmetrized_structures)}")
-for i, symm_struct in enumerate(symmetrized_structures):
-    if symm_struct:
-        symm_struct.wyckoff_symbols
+    structures, symmetrized_structures = symmetrized_structures_from_cif(cif_path)
+    print(f"Number of structures: {len(structures)}")
+    print(f"Number of symmetrized structures: {len(symmetrized_structures)}")
+    for i, symm_struct in enumerate(symmetrized_structures):
+        if symm_struct:
+            symm_struct.wyckoff_symbols
+
+
+if __name__ == "__main__":
+    main()
