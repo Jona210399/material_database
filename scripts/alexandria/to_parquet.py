@@ -36,7 +36,7 @@ def alexandria_raw_to_parquet(
             ]
         )
         entries = entries.select(
-            [id_column] + [col for col in entries.columns if col == id_column]
+            [id_column] + [col for col in entries.columns if col != id_column]
         )
         entries.write_parquet(
             alexandria_raw_dir_parquet / file.name.replace(".json.bz2", ".parquet")
