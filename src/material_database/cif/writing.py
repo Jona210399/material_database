@@ -181,7 +181,6 @@ def get_atom_site_cif_string(
             atom_site_wyckoff_symbol.append(wyckoff)
             count += 1
 
-    print(atom_site_type_symbol)
     blocks["_atom_type_symbol"] = list(symbol_to_oxi_num)
     blocks["_atom_type_oxidation_number"] = list(symbol_to_oxi_num.values())
     blocks["_atom_site_type_symbol"] = atom_site_type_symbol
