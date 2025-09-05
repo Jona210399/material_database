@@ -3,8 +3,8 @@ from pathlib import Path
 import polars as pl
 from tqdm import tqdm
 
+from material_database.alexandria.reading import read_raw_alexandria_json_bz2
 from material_database.alexandria.sanitize import (
-    read_raw_alexandria_json_bz2,
     sanitize_alexandria_entry,
 )
 

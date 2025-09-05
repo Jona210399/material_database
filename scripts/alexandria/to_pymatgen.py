@@ -5,40 +5,20 @@ import polars as pl
 from pymatgen.entries.computed_entries import (
     ComputedStructureEntry,
 )
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer, SpacegroupOperations
-from pymatgen.symmetry.groups import SpaceGroup
-from pymatgen.symmetry.structure import SymmetrizedStructure
 from tqdm import tqdm
 
 from material_database.alexandria.parse import alexandria_entry_to_pymatgen
-from material_database.alexandria.sanitize import remove_empty_fields
-from material_database.cif.writing import analyzer_to_cif
-
-
-def symmetrized_structure_from_serialized(entry: dict) -> SymmetrizedStructure:
-    spacegroup = SpaceGroup.from_int_number(entry["spacegroup"])
-    entry["spacegroup"] = SpacegroupOperations(
-        int_number=spacegroup.int_number,
-        int_symbol=spacegroup.full_symbol,
-        symmops=list(spacegroup.symmetry_ops),
-    )
-    return SymmetrizedStructure.from_dict(entry)
+from material_database.serialization import (
+    structure_to_serialized_symmetrized_structure_and_cif,
+)
 
 
 def process_entry(
     entry: ComputedStructureEntry,
 ) -> tuple[dict, str]:
-    analyzer = SpacegroupAnalyzer(entry.structure)
-    symmetrized_structure = analyzer.get_symmetrized_structure()
-    symmetrized_structure = symmetrized_structure.as_dict()
-    symmetrized_structure["equivalent_positions"] = symmetrized_structure[
-        "equivalent_positions"
-    ].tolist()
-    symmetrized_structure = remove_empty_fields(symmetrized_structure)
-    symmetrized_structure["spacegroup"] = analyzer.get_space_group_number()
-    cif = analyzer_to_cif(analyzer=analyzer)
-
-    return symmetrized_structure, cif
+    return structure_to_serialized_symmetrized_structure_and_cif(
+        structure=entry.structure
+    )
 
 
 def process_entries_concurrently(
