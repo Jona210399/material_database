@@ -153,7 +153,7 @@ def main():
     cif_path = "tests/files/cif/Graphite.cif"
     structure = Structure.from_file(cif_path)
     analyzer = SpacegroupAnalyzer(structure)
-    symmetrized_structure = analyzer.get_symmetrized_structure()
+    _ = analyzer.get_symmetrized_structure()
 
     structures, symmetrized_structures = symmetrized_structures_from_cif(cif_path)
     print(f"Number of structures: {len(structures)}")
