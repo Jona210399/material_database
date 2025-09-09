@@ -8,6 +8,7 @@ from pymatgen.entries.computed_entries import (
 from tqdm import tqdm
 
 from material_database.alexandria.parse import alexandria_entry_to_pymatgen
+from material_database.constants import ColumnNames
 from material_database.serialization import (
     structure_to_serialized_symmetrized_structure_and_cif,
 )
@@ -67,19 +68,18 @@ def main():
             data["entries"].to_list()
         )
 
-        symmetrized_structures = (
+        data.with_columns(
             pl.Series(
-                name="symmetrized_structure",
+                name=ColumnNames.SYMMETRIZED_STRUCTURE,
                 values=symmetrized_structures,
             ),
-        )
-
-        data.with_columns(symmetrized_structures).drop("entries").write_parquet(
-            pymatgen_destination / file.name
-        )
+        ).drop("entries").write_parquet(pymatgen_destination / file.name)
 
         data.with_columns(
-            pl.Series(name="cif", values=cifs),
+            pl.Series(
+                name=ColumnNames.CIF,
+                values=cifs,
+            ),
         ).drop("entries").write_parquet(cif_destination / file.name)
 
 
