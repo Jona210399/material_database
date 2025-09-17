@@ -1,4 +1,7 @@
+import numpy as np
+from pymatgen.core.structure import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+from pymatgen.symmetry.structure import SymmetrizedStructure
 
 from material_database.cif.writing import analyzer_to_cif
 
@@ -18,17 +21,24 @@ def remove_empty_fields(d: dict) -> dict:
     return new_dict
 
 
+def serialize_symmetrized_structure(structure: SymmetrizedStructure) -> dict:
+    d = structure.as_dict()
+    d["equivalent_positions"] = (
+        d["equivalent_positions"].tolist()
+        if isinstance(d["equivalent_positions"], np.ndarray)
+        else d["equivalent_positions"]
+    )
+    d["spacegroup"] = structure.spacegroup.int_number
+    d = remove_empty_fields(d)
+    return d
+
+
 def structure_to_serialized_symmetrized_structure_and_cif(
-    structure,
+    structure: Structure,
 ) -> tuple[dict, str]:
     analyzer = SpacegroupAnalyzer(structure)
     symmetrized_structure = analyzer.get_symmetrized_structure()
-    symmetrized_structure = symmetrized_structure.as_dict()
-    symmetrized_structure["equivalent_positions"] = symmetrized_structure[
-        "equivalent_positions"
-    ].tolist()
-    symmetrized_structure = remove_empty_fields(symmetrized_structure)
-    symmetrized_structure["spacegroup"] = analyzer.get_space_group_number()
+    symmetrized_structure = serialize_symmetrized_structure(symmetrized_structure)
     cif = analyzer_to_cif(analyzer=analyzer)
 
     return symmetrized_structure, cif

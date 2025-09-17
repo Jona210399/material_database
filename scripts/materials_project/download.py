@@ -107,7 +107,7 @@ def main():
     )
 
     cifs.write_parquet(
-        destination_folder / "cifs" / "materials_project_000.parquet", mkdir=True
+        destination_folder / "cif" / "materials_project_000.parquet", mkdir=True
     )
     write_time_stamp(destination_folder=destination_folder)
 
