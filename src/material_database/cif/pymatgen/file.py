@@ -72,3 +72,12 @@ class CifFile:
         """
         with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
             return cls.from_str(file.read())  # type:ignore[arg-type]
+
+    def as_dict(self) -> dict:
+        """MSONable dict."""
+        dct: dict = {}
+        for key, val in self.data.items():
+            dct[key] = {}
+            for sub_key, sub_val in val.data.items():
+                dct[key][sub_key] = sub_val
+        return dct

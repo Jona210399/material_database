@@ -4,7 +4,6 @@ from typing import Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 from pymatgen.core.operations import MagSymmOp
-from pymatgen.io.cif import CifFile
 from pymatgen.symmetry.maggroups import MagneticSpaceGroup
 
 from material_database.cif.pymatgen.block import CifBlock
@@ -14,7 +13,7 @@ LOGGER = getLogger(__name__)
 LOGGER.setLevel(WARNING)
 
 
-def is_magcif(cif: CifFile) -> bool:
+def is_magcif(cif_block: CifBlock) -> bool:
     """Check if a file is a magCIF file (heuristic)."""
     # Doesn't seem to be a canonical way to test if file is magCIF or
     # not, so instead check for magnetic symmetry datanames
@@ -23,15 +22,16 @@ def is_magcif(cif: CifFile) -> bool:
         "_atom_site_moment",
         "_space_group_symop_magn",
     ]
-    for data in cif.data.values():
-        for key in data.data:
-            for prefix in prefixes:
-                if prefix in key:
-                    return True
+
+    for key in cif_block.data:
+        for prefix in prefixes:
+            if prefix in key:
+                return True
+
     return False
 
 
-def is_magcif_incommensurate(cif: CifFile) -> bool:
+def is_magcif_incommensurate(cif_block: CifBlock) -> bool:
     """
     Check if a file contains an incommensurate magnetic
     structure (heuristic).
@@ -39,15 +39,14 @@ def is_magcif_incommensurate(cif: CifFile) -> bool:
     # Doesn't seem to be a canonical way to test if magCIF file
     # describes incommensurate structure or not, so instead check
     # for common datanames
-    if not is_magcif(cif):
+    if not is_magcif(cif_block):
         return False
 
     prefixes = ["_cell_modulation_dimension", "_cell_wave_vector"]
-    for data in cif.data.values():
-        for key in data.data:
-            for prefix in prefixes:
-                if prefix in key:
-                    return True
+    for key in cif_block:
+        for prefix in prefixes:
+            if prefix in key:
+                return True
     return False
 
 
@@ -69,7 +68,7 @@ def parse_magnetic_moments(cif_block: CifBlock) -> dict[str, NDArray]:
     return magmoms
 
 
-def get_magnetic_symops(self, data: CifBlock) -> list[MagSymmOp]:
+def get_magnetic_symops(data: CifBlock) -> list[MagSymmOp]:
     """Equivalent to get_symops except for magnetic symmetry groups.
     Separate function since additional operation for time reversal symmetry
     (which changes magnetic moments on sites) needs to be returned.
