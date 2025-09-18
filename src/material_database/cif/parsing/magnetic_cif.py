@@ -6,8 +6,8 @@ from numpy.typing import NDArray
 from pymatgen.core.operations import MagSymmOp
 from pymatgen.symmetry.maggroups import MagneticSpaceGroup
 
-from material_database.cif.pymatgen.block import CifBlock
-from material_database.cif.pymatgen.utils import str2float
+from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.utils import str2float
 
 LOGGER = getLogger(__name__)
 LOGGER.setLevel(WARNING)

@@ -1,7 +1,7 @@
 from logging import WARNING, getLogger
 
-from material_database.cif.pymatgen.block import CifBlock
-from material_database.cif.pymatgen.sanitization import sanitize_cif_block
+from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.sanitization import sanitize_cif_block
 
 LOGGER = getLogger(__name__)
 LOGGER.setLevel(WARNING)

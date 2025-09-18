@@ -10,38 +10,39 @@ import numpy as np
 from numpy.typing import NDArray
 from pymatgen.core import (
     Composition,
-    DummySpecies,
     Element,
     PeriodicSite,
     Species,
     Structure,
-    get_el_sp,
 )
 from pymatgen.core.operations import SymmOp
-from pymatgen.io.core import ParseError
 from pymatgen.symmetry.groups import SpaceGroup
 from pymatgen.symmetry.structure import SymmetrizedStructure
 from pymatgen.util.coord import find_in_coord_list_pbc, in_coord_list_pbc
 
+from material_database.cif.parsing.atomic_sites import (
+    get_species_from_atom_site,
+    parse_atom_sites,
+)
+from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.file import CifFile
+from material_database.cif.parsing.lattice import (
+    check_min_lattice_thickness,
+    get_lattice,
+)
+from material_database.cif.parsing.magnetic_cif import (
+    is_magcif,
+    is_magcif_incommensurate,
+)
+from material_database.cif.parsing.sanitization import sanitize_cif_block
 from material_database.cif.parsing.spacegroup import (
     get_spacegroup_information,
 )
+from material_database.cif.parsing.utils import str2float
 from material_database.cif.parsing.wyckoffs import (
     get_wyckoff_letters_as_in_cif,
     get_wyckoff_multiplicities,
 )
-from material_database.cif.pymatgen.block import CifBlock
-from material_database.cif.pymatgen.file import CifFile
-from material_database.cif.pymatgen.magnetic_cif import (
-    is_magcif,
-    is_magcif_incommensurate,
-)
-from material_database.cif.pymatgen.parse_lattice import (
-    check_min_lattice_thickness,
-    get_lattice,
-)
-from material_database.cif.pymatgen.sanitization import sanitize_cif_block
-from material_database.cif.pymatgen.utils import str2float
 
 LOGGER = getLogger(__name__)
 LOGGER.setLevel(WARNING)
@@ -63,7 +64,7 @@ class ParsingSettings:
 
 
 def parse_magnetic_cif(
-    cif: CifFile, parsing_settings: ParsingSettings
+    cif_block: CifBlock, parsing_settings: ParsingSettings
 ) -> list[Structure]:
     pass
 
@@ -80,34 +81,6 @@ def parse_cif(
         raise NotImplementedError("Incommensurate magnetic structures not supported.")
 
     return parse_standard_cif(cif_block, parsing_settings)
-
-
-def get_species_from_atom_site(
-    atom_site: str,
-    oxidation_states: dict[str, float] | None,
-) -> Element | Species | DummySpecies | None:
-    element_symbol = _parse_symbol(atom_site)
-
-    if not element_symbol:
-        return None
-
-    if oxidation_states is not None:
-        oxidation_state = oxidation_states.get(element_symbol, 0)
-        oxidation_state = oxidation_states.get(atom_site, oxidation_state)
-
-        try:
-            return Species(element_symbol, oxidation_state)
-        except (ValueError, ParseError):
-            return DummySpecies(element_symbol, oxidation_state)
-
-    return get_el_sp(element_symbol)
-
-
-def parse_atom_sites(block: CifBlock) -> list[str] | None:
-    atom_site_labels = block.get("_atom_site_label", [])
-    atom_site_type_symbols = block.get("_atom_site_type_symbol", None)
-    atom_sites = atom_site_type_symbols or atom_site_labels
-    return atom_sites
 
 
 def parse_occupancies(block: CifBlock) -> list[float] | None:
@@ -448,48 +421,6 @@ def _parse_oxidation_states(cif_block: CifBlock) -> dict[str, float] | None:
     except (ValueError, KeyError):
         oxi_states = None
     return oxi_states
-
-
-def _parse_symbol(symbol: str) -> str | None:
-    """Parse a string with a symbol to extract a string representing an element.
-
-    Args:
-        sym (str): A symbol to be parsed.
-
-    Returns:
-        A string for the parsed symbol. None if no parsing was possible.
-    """
-    # Common representations for elements/water in CIF files
-    # TODO: fix inconsistent handling of water
-    special_syms = {
-        "Hw": "H",
-        "Ow": "O",
-        "Wat": "O",
-        "wat": "O",
-        "OH": "",
-        "OH2": "",
-        "NO3": "N",
-    }
-
-    parsed_sym = None
-    # Try with special symbols, otherwise check the first two letters,
-    # then the first letter alone. If everything fails try extracting the
-    # first letter.
-    m_sp = re.match("|".join(special_syms), symbol)
-    if m_sp:
-        parsed_sym = special_syms[m_sp.group()]
-    elif Element.is_valid_symbol(symbol[:2].title()):
-        parsed_sym = symbol[:2].title()
-    elif Element.is_valid_symbol(symbol[0].upper()):
-        parsed_sym = symbol[0].upper()
-    elif match := re.match(r"w?[A-Z][a-z]*", symbol):
-        parsed_sym = match.group()
-
-    if parsed_sym is not None and (m_sp or not re.match(rf"{parsed_sym}\d*", symbol)):
-        msg = f"{symbol} parsed as {parsed_sym}"
-        LOGGER.warning(msg)
-
-    return parsed_sym
 
 
 def get_matching_coordinate(

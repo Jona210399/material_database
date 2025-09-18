@@ -7,8 +7,8 @@ from pymatgen.symmetry.analyzer import SpacegroupOperations
 from pymatgen.symmetry.groups import SYMM_DATA, SpaceGroup
 from pymatgen.symmetry.site_symmetries import SymmOp
 
-from material_database.cif.pymatgen.block import CifBlock
-from material_database.cif.pymatgen.utils import str2float
+from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.utils import str2float
 
 
 def clean_up_spacegroup_string(s: str) -> str:

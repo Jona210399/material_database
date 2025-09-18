@@ -4,7 +4,7 @@ from monty.io import zopen
 from pymatgen.util.typing import PathLike
 from typing_extensions import Self
 
-from material_database.cif.pymatgen.block import CifBlock
+from material_database.cif.parsing.block import CifBlock
 
 
 class CifFile:

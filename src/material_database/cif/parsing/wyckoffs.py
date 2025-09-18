@@ -1,4 +1,4 @@
-from material_database.cif.pymatgen.block import CifBlock
+from material_database.cif.parsing.block import CifBlock
 
 
 def get_wyckoff_letters_as_in_cif(block: CifBlock) -> list[str] | None:

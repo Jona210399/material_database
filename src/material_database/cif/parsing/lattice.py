@@ -3,8 +3,8 @@ from logging import WARNING, getLogger
 
 from pymatgen.core.lattice import Lattice
 
-from material_database.cif.pymatgen.block import CifBlock
-from material_database.cif.pymatgen.utils import str2float
+from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.utils import str2float
 
 LOGGER = getLogger(__name__)
 LOGGER.setLevel(WARNING)
