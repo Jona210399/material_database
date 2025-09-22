@@ -1,35 +1,38 @@
-import math
-import re
-import warnings
+from collections import defaultdict
 from dataclasses import dataclass
-from itertools import groupby
-from logging import WARNING, getLogger
-from typing import Literal
 
-import numpy as np
 from numpy.typing import NDArray
 from pymatgen.core import (
     Composition,
-    Element,
-    PeriodicSite,
-    Species,
     Structure,
 )
+from pymatgen.core.lattice import Lattice
 from pymatgen.core.operations import SymmOp
 from pymatgen.symmetry.groups import SpaceGroup
 from pymatgen.symmetry.structure import SymmetrizedStructure
-from pymatgen.util.coord import find_in_coord_list_pbc, in_coord_list_pbc
 
 from material_database.cif.parsing.atomic_sites import (
-    get_species_from_atom_site,
-    parse_atom_sites,
+    parse_compositions,
 )
 from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.coordinates import (
+    get_equivalent_coordinates,
+    get_matching_coordinate,
+    parse_fractional_coordinates,
+)
 from material_database.cif.parsing.file import CifFile
 from material_database.cif.parsing.lattice import (
-    check_min_lattice_thickness,
     get_lattice,
+    passes_minimal_lattice_thickness_check,
 )
+from material_database.cif.parsing.logger import (
+    LOGGER,
+    add_file_handler,
+    disable_console_logging,
+    enable_console_logging,
+    remove_file_handler,
+)
+from material_database.cif.parsing.magnetic import parse_magnetic_cif
 from material_database.cif.parsing.magnetic_cif import (
     is_magcif,
     is_magcif_incommensurate,
@@ -38,14 +41,10 @@ from material_database.cif.parsing.sanitization import sanitize_cif_block
 from material_database.cif.parsing.spacegroup import (
     get_spacegroup_information,
 )
-from material_database.cif.parsing.utils import str2float
 from material_database.cif.parsing.wyckoffs import (
     get_wyckoff_letters_as_in_cif,
     get_wyckoff_multiplicities,
 )
-
-LOGGER = getLogger(__name__)
-LOGGER.setLevel(WARNING)
 
 
 @dataclass
@@ -55,24 +54,29 @@ class ParsingSettings:
     occupancy_tolerance: float = 1.0
     site_tolerance: float = 1e-4
     fraction_tolerance: float = 1e-4
-    check_cif: bool = False
     composition_tolerance: float = 0.01
     min_lattice_thickness: float = 0.01
-    primitive: bool = True
+    primitive: bool = False
     symmetrized: bool = True
-    check_occu: bool = False
-
-
-def parse_magnetic_cif(
-    cif_block: CifBlock, parsing_settings: ParsingSettings
-) -> list[Structure]:
-    pass
+    check_occupancies: bool = False
+    check_cif: bool = True
+    log_file: str | None = None
+    log_to_console: bool = True
 
 
 def parse_cif(
-    cif_block: CifBlock, parsing_settings: ParsingSettings = ParsingSettings()
+    cif_block: CifBlock,
+    parsing_settings: ParsingSettings = ParsingSettings(),
 ) -> list[Structure]:
-    pass
+    if parsing_settings.log_to_console:
+        enable_console_logging()
+    else:
+        disable_console_logging()
+
+    if parsing_settings.log_file is not None:
+        add_file_handler(parsing_settings.log_file)
+    else:
+        remove_file_handler()
 
     if is_magcif(cif_block):
         return parse_magnetic_cif(cif_block, parsing_settings)
@@ -80,377 +84,298 @@ def parse_cif(
     if is_magcif_incommensurate(cif_block):
         raise NotImplementedError("Incommensurate magnetic structures not supported.")
 
-    return parse_standard_cif(cif_block, parsing_settings)
+    return _parse_standard_cif(cif_block, parsing_settings)
 
 
-def parse_occupancies(block: CifBlock) -> list[float] | None:
-    KEYS_TO_TRY = [
-        "_atom_site_occupancy",
-        "_atom_site_occupancies",
-        "_atom_site_occupancy_ ",
-        "_atom_site_occupancies_",
-    ]
-
-    for key in KEYS_TO_TRY:
-        occupancies: list[str] = block.get(key, None)
-        if occupancies is not None:
-            break
-
-    if occupancies is None:
-        LOGGER.warning("No occupancy data found in CIF block.")
-        return None
-
-    occupancies_as_floats = []
-    for occupancy in occupancies:
-        try:
-            occupancy = str2float(occupancy.strip())
-            occupancies_as_floats.append(occupancy)
-        except ValueError as e:
-            LOGGER.warning(f"Invalid occupancy value '{occupancy}': {e}")
-            return None
-
-    return occupancies_as_floats
-
-
-def parse_fractional_coordinates(
-    block: CifBlock, num_sites: int
-) -> list[tuple[float, float, float]] | None:
-    x, y, z = [block.get(f"_atom_site_fract_{axis}", None) for axis in "xyz"]
-
-    if None in (x, y, z):
-        LOGGER.warning("Missing fractional coordinate data in CIF block.")
-        return None
-
-    if not (len(x) == len(y) == len(z) == num_sites):
-        LOGGER.warning("Inconsistent number of fractional coordinates in CIF block.")
-        return None
-
-    fractional_coordinates = []
-    for i in range(num_sites):
-        try:
-            coord = (str2float(x[i]), str2float(y[i]), str2float(z[i]))
-            fractional_coordinates.append(coord)
-        except ValueError as e:
-            LOGGER.warning(
-                f"Invalid fractional coordinate at index {i}: ({x[i]}, {y[i]}, {z[i]}): {e}"
-            )
-            return None
-
-    return fractional_coordinates
-
-
-def parse_standard_cif(
+def _parse_standard_cif(
     cif_block: CifBlock, parsing_settings: ParsingSettings
-) -> list[Structure]:
+) -> Structure | SymmetrizedStructure:
+    if parsing_settings.symmetrized and parsing_settings.primitive:
+        raise ValueError("Cannot set both symmetrized and primitive to True.")
+
+    try:
+        parsing_result = _parse_raw_cif(cif_block, parsing_settings)
+    except ValueError as exc:
+        LOGGER.warning(f"Error parsing CIF block: {exc}")
+        return None
+
+    structure = _build_structure(
+        parsing_result,
+        site_tolerance=parsing_settings.site_tolerance,
+        return_symmetrized=parsing_settings.symmetrized,
+    )
+
+    if parsing_settings.primitive:
+        structure = structure.get_primitive_structure()
+        structure = structure.get_reduced_structure()
+
+    if parsing_settings.check_cif:
+        cif_failure_reason = check(
+            cif_block,
+            structure,
+            composition_tolerance=parsing_settings.composition_tolerance,
+        )
+        if cif_failure_reason is not None:
+            LOGGER.warning(cif_failure_reason)
+            print("failure reason:", cif_failure_reason)
+
+    return structure
+
+
+def _parse_raw_cif(
+    cif_block: CifBlock, parsing_settings: ParsingSettings
+) -> (
+    tuple[
+        dict[tuple[float, float, float], Composition],
+        dict[tuple[float, float, float], str],
+        dict[tuple[float, float, float], str],
+        dict[tuple[float, float, float], int],
+        Lattice,
+        list[SymmOp],
+        dict[str, list[int]],
+    ]
+    | None
+):
     sanitize_cif_block(cif_block, parsing_settings.fraction_tolerance)
 
     lattice = get_lattice(cif_block)
-    check_min_lattice_thickness(lattice, parsing_settings.min_lattice_thickness)
+    if lattice is None:
+        raise ValueError("Could not parse lattice from CIF block.")
+
+    if not passes_minimal_lattice_thickness_check(
+        lattice, parsing_settings.min_lattice_thickness
+    ):
+        raise ValueError(
+            f"Lattice thickness is below the minimum threshold of {parsing_settings.min_lattice_thickness}."
+        )
 
     spacegroup_infos = get_spacegroup_information(cif_block)
+
     if spacegroup_infos is None:
         LOGGER.warning("No spacegroup information found, assuming P1.")
-        symmetry_operations = SpaceGroup.from_int_number(1).symmetry_ops
+        spacegroup = SpaceGroup.from_int_number(1)
+        spacegroup_operations = spacegroup.symmetry_ops
 
-    spacegroup_operations, spacegroup = spacegroup_infos
-    symmetry_operations = spacegroup_operations  # type:ignore[assignment]
+    else:
+        spacegroup_operations, spacegroup = spacegroup_infos
 
-    oxidation_states = _parse_oxidation_states(cif_block)
+    compositions_and_atom_sites = parse_compositions(cif_block)
 
-    atom_sites = parse_atom_sites(cif_block)
-    if atom_sites is None:
-        raise ValueError("Could not parse atom sites.")
+    if compositions_and_atom_sites is None:
+        raise ValueError("Could not parse atom sites into compositions.")
 
-    occupancies = parse_occupancies(cif_block)
-
-    if occupancies is None:
-        raise ValueError("Could not parse occupancies.")
+    compositions, atom_sites, site_properties = compositions_and_atom_sites
 
     wyckoff_letters = get_wyckoff_letters_as_in_cif(cif_block) or ["Not Parsed"] * len(
-        atom_sites
+        compositions
     )
-    wyckoff_multiplicities = get_wyckoff_multiplicities(cif_block) or [1] * len(
-        atom_sites
+    wyckoff_multiplicities = get_wyckoff_multiplicities(cif_block) or [None] * len(
+        compositions
     )
 
-    fractional_coordinates = parse_fractional_coordinates(cif_block, len(atom_sites))
+    fractional_coordinates = parse_fractional_coordinates(cif_block, len(compositions))
 
     if fractional_coordinates is None:
         raise ValueError("Could not parse fractional coordinates.")
 
-    coord_to_species: dict[tuple[float, float, float], Composition] = {}
-    coord_to_site_label: dict[tuple[float, float, float], str] = {}
-    coord_to_wyckoff: dict[tuple[float, float, float], str] = {}
-    coord_to_multiplicity: dict[tuple[float, float, float], int] = {}
+    coord_to_composition: dict[tuple[float, float, float], Composition] = defaultdict(
+        Composition
+    )
 
-    for idx, atom_site in enumerate(atom_sites):
-        species = get_species_from_atom_site(atom_site, oxidation_states)
-        occupancy = occupancies[idx]
-        coordinate = fractional_coordinates[idx]
+    coord_to_site_label: dict[tuple[float, float, float], list[str]] = defaultdict(
+        lambda: ""
+    )
+    coord_to_wyckoff: dict[tuple[float, float, float], list[str]] = defaultdict(list)
+    coord_to_multiplicity: dict[tuple[float, float, float], list[int]] = defaultdict(
+        list
+    )
 
-        # Create Composition
-        composition_dict: dict[Species | str, float] = {species: max(occupancy, 1e-8)}
+    for i in range(len(compositions)):
+        coordinate = fractional_coordinates[i]
+        composition = compositions[i]
+        atom_site = atom_sites[i]
+        wyckoff_letter = wyckoff_letters[i]
+        wyckoff_multiplicity = wyckoff_multiplicities[i]
 
-        num_h = get_num_implicit_hydrogens(atom_site)
-        if num_h > 0:
-            composition_dict["H"] = num_h
-            LOGGER.warning(
-                "Structure has implicit hydrogens defined, parsed structure unlikely to be "
-                "suitable for use in calculations unless hydrogens added."
-            )
-
-        composition = Composition(composition_dict)
-
-        # Find matching site by coordinate
-        match: tuple[float, float, float] | Literal[False] = get_matching_coordinate(
-            coord_to_species,
+        match = get_matching_coordinate(
+            coord_to_composition,
             coordinate,
-            symmetry_operations=symmetry_operations,
+            symmetry_operations=spacegroup_operations,
             site_tolerance=parsing_settings.site_tolerance,
         )
-        if not match:
-            coord_to_species[coordinate] = composition
-            coord_to_site_label[coordinate] = atom_site
-            coord_to_wyckoff[coordinate] = wyckoff_letters[idx]
-            coord_to_multiplicity[coordinate] = wyckoff_multiplicities[idx]
+        coord_to_composition[match] += composition
+        coord_to_site_label[match] += atom_site
+        coord_to_wyckoff[match].append(wyckoff_letter)
+        coord_to_multiplicity[match].append(wyckoff_multiplicity)
 
-        else:
-            coord_to_species[match] += composition
-            coord_to_site_label[match] += atom_site
+    coord_to_composition = _verify_composition_occupancies(
+        coord_to_composition,
+        parsing_settings.check_occupancies,
+        parsing_settings.occupancy_tolerance,
+    )
 
-            current_wyckoff = coord_to_wyckoff[match]
-            if current_wyckoff != wyckoff_letters[idx]:
-                raise ValueError("Mismatched Wyckoff letters for same site.")
+    for coord, wyckoff in coord_to_wyckoff.items():
+        if len(set(wyckoff)) > 1:
+            LOGGER.warning(
+                f"Multiple Wyckoff letters {wyckoff} found for coordinate {coord}. Using the first one: {wyckoff[0]}."
+            )
+        coord_to_wyckoff[coord] = wyckoff[0]
 
-            coord_to_wyckoff[match] = wyckoff_letters[idx]
+    for coord, mult in coord_to_multiplicity.items():
+        if len(set(mult)) > 1:
+            LOGGER.warning(
+                f"Multiple Wyckoff multiplicities {mult} found for coordinate {coord}. Using the first one: {mult[0]}."
+            )
+        coord_to_multiplicity[coord] = mult[0]
 
-            current_multiplicity = coord_to_multiplicity[match]
-            if current_multiplicity != wyckoff_multiplicities[idx]:
-                raise ValueError("Mismatched multiplicities for same site.")
+    return (
+        dict(coord_to_composition),
+        dict(coord_to_site_label),
+        dict(coord_to_wyckoff),
+        dict(coord_to_multiplicity),
+        lattice,
+        spacegroup_operations,
+        site_properties,
+    )
 
-            coord_to_multiplicity[match] = wyckoff_multiplicities[idx]
 
-    # Check occupancy
-    _sum_occupancies: list[float] = [
-        sum(comp.values())
-        for comp in coord_to_species.values()
-        if set(comp.elements) != {Element("O"), Element("H")}
-    ]
+def _build_structure(
+    parsing_result: tuple[
+        dict[tuple[float, float, float], Composition],
+        dict[tuple[float, float, float], str],
+        dict[tuple[float, float, float], str],
+        dict[tuple[float, float, float], int],
+        Lattice,
+        list[SymmOp],
+        dict[str, list[int]],
+    ],
+    site_tolerance: float,
+    return_symmetrized: bool,
+) -> Structure | None:
+    (
+        coord_to_composition,
+        coord_to_site_label,
+        coord_to_wyckoff,
+        coord_to_multiplicity,
+        lattice,
+        spacegroup_operations,
+        site_properties,
+    ) = parsing_result
 
-    if any(occu > 1.0 for occu in _sum_occupancies):
-        LOGGER.warning(
-            f"Some occupancies ({list(filter(lambda x: x > 1, _sum_occupancies))}) sum to > 1! If they are within "
-            "the occupancy_tolerance, they will be rescaled. "
-            f"The current occupancy_tolerance is set to: {parsing_settings.occupancy_tolerance}"
-        )
-
-    # Collect info for building Structure
-    all_species: list[Composition] = []
-    all_species_noedit: list[Composition] = []
-    all_coords: list[tuple[float, float, float]] = []
-    all_hydrogens: list[float] = []
+    all_compositions: list[Composition] = []
+    all_coordinates: list[tuple[float, float, float]] = []
     all_labels: list[str] = []
     all_wyckoff_letters: list[str] = []
 
-    if coord_to_species.items():
-        grouped = groupby(
-            coord_to_species.items(),
-            key=lambda x: x[1],
+    compositions_to_coords: dict[Composition, list[tuple[float, float, float]]] = (
+        defaultdict(list)
+    )
+    for coord, composition in coord_to_composition.items():
+        compositions_to_coords[composition].append(coord)
+
+    coords_to_equivalent_coords: dict[tuple[float, float, float], list[NDArray]] = {
+        coord: get_equivalent_coordinates(
+            coordinate=coord,
+            symmetry_operations=spacegroup_operations,
+            site_tolerance=site_tolerance,
         )
+        for coord in coord_to_composition.keys()
+    }
 
-        for composition, group in grouped:
-            tmp_coords: list[tuple[float, float, float]] = [site[0] for site in group]
+    for coord, multiplicity in coord_to_multiplicity.items():
+        if multiplicity is None:
+            coord_to_multiplicity[coord] = len(coords_to_equivalent_coords[coord])
+            continue
 
-            coords, new_labels, new_wyckoff_letters = _unique_coords(
-                tmp_coords,
-                site_tolerance=parsing_settings.site_tolerance,
-                symmetry_operations=symmetry_operations,
-                labels=coord_to_site_label,
-                wyckoff_letters=coord_to_wyckoff,
+        if multiplicity != (mult := len(coords_to_equivalent_coords[coord])):
+            LOGGER.warning(
+                f"Wyckoff multiplicity {multiplicity} does not match the number of equivalent positions {mult} for coordinate {coord}. Using the number of equivalent positions."
             )
+            multiplicity = mult
 
-            if set(composition.elements) == {Element("O"), Element("H")}:
-                # O with implicit hydrogens
-                im_h = composition["H"]
-                species = Composition({"O": composition["O"]})
-            else:
-                im_h = 0
-                species = composition
+        coord_to_multiplicity[coord] = multiplicity
 
-            all_hydrogens.extend(len(coords) * [im_h])
-            all_coords.extend(coords)  # type:ignore[arg-type]
-            all_species.extend(len(coords) * [species])
-            all_labels.extend(new_labels)
-            all_wyckoff_letters.extend(new_wyckoff_letters)
+    for composition, coordinates in compositions_to_coords.items():
+        equivalent_coords = [
+            equiv_coord
+            for coord in coordinates
+            for equiv_coord in coords_to_equivalent_coords[coord]
+        ]
 
-        # Scale occupancies if necessary
-        all_species_noedit = (
-            all_species.copy()
-        )  # save copy before scaling in case of check_occu=False, used below
-        for idx, species in enumerate(all_species):
-            total_occu = sum(species.values())
-            if (
-                parsing_settings.check_occu
-                and total_occu > parsing_settings.occupancy_tolerance
-            ):
-                raise ValueError(f"Occupancy {total_occu} exceeded tolerance.")
+        labels = [
+            coord_to_site_label[coord]
+            for coord in coordinates
+            for _ in coords_to_equivalent_coords[coord]
+        ]
 
-            if total_occu > 1:
-                all_species[idx] = species / total_occu
+        wyckoffs = [
+            coord_to_wyckoff[coord]
+            for coord in coordinates
+            for _ in coords_to_equivalent_coords[coord]
+        ]
 
-    if all_species and len(all_species) == len(all_coords):
-        site_properties: dict[str, list] = {}
-        if any(all_hydrogens):
-            if len(all_hydrogens) != len(all_coords):
-                raise ValueError("lengths of all_hydrogens and all_coords mismatch")
-            site_properties["implicit_hydrogens"] = all_hydrogens
+        all_coordinates.extend(equivalent_coords)
+        all_compositions.extend(len(equivalent_coords) * [composition])
+        all_labels.extend(labels)
+        all_wyckoff_letters.extend(wyckoffs)
 
-        if not site_properties:
-            site_properties = {}
+    struct = Structure(
+        lattice,
+        all_compositions,
+        all_coordinates,
+        site_properties=site_properties,
+        labels=all_labels,
+    )
 
-        if any(all_labels):
-            if len(all_labels) != len(all_species):
-                raise ValueError("lengths of all_labels and all_species mismatch")
-        else:
-            all_labels = None  # type: ignore[assignment]
+    if not return_symmetrized:
+        return struct.get_sorted_structure()
 
-        struct: Structure = Structure(
-            lattice,  # type:ignore[arg-type]
-            all_species,
-            all_coords,
-            site_properties=site_properties,
-            labels=all_labels,
+    if "Not Parsed" in all_wyckoff_letters:
+        LOGGER.warning(
+            "Wyckoff letters not parsed, falling back to SpacegroupAnalyzer."
         )
 
-        if parsing_settings.symmetrized:
-            try:
-                equivalent_indices = [
-                    i
-                    for i, mult in enumerate(coord_to_multiplicity.values())
-                    for _ in range(mult)
-                ]
-                struct = SymmetrizedStructure(
-                    struct,
-                    spacegroup_operations,
-                    equivalent_indices,
-                    all_wyckoff_letters,
-                )
-
-            except ValueError:
-                analyzer = SpacegroupAnalyzer(struct)
-                struct = analyzer.get_symmetrized_structure()
-
-        if not parsing_settings.check_occu:
-            if lattice is None:
-                raise RuntimeError("Cannot generate Structure with lattice as None.")
-
-            for idx in range(len(struct)):
-                struct[idx] = PeriodicSite(
-                    all_species_noedit[idx],
-                    all_coords[idx],
-                    lattice,
-                    properties=site_properties,
-                    label=all_labels[idx],
-                    skip_checks=True,
-                )
-
-        if parsing_settings.symmetrized or not parsing_settings.check_occu:
-            return struct
-
-        struct = struct.get_sorted_structure()
-
-        if parsing_settings.primitive:
-            struct = struct.get_primitive_structure()
-            struct = struct.get_reduced_structure()
-
-        if parsing_settings.check_cif:
-            cif_failure_reason = check(struct)
-            if cif_failure_reason is not None:
-                warnings.warn(cif_failure_reason, stacklevel=2)
-
+        analyzer = SpacegroupAnalyzer(struct)
+        struct = analyzer.get_symmetrized_structure()
         return struct
-    return None
+
+    equivalent_indices = [
+        i for i, mult in enumerate(coord_to_multiplicity.values()) for _ in range(mult)
+    ]
+
+    return SymmetrizedStructure(
+        struct,
+        spacegroup_operations,
+        equivalent_indices,
+        all_wyckoff_letters,
+    )
 
 
-def _unique_coords(
-    coords: list[tuple[float, float, float]],
-    symmetry_operations: list[SymmOp],
-    site_tolerance: float,
-    labels: dict[tuple[float, float, float], str] | None = None,
-    wyckoff_letters: dict[tuple[float, float, float], str] | None = None,
-) -> tuple[
-    list[NDArray],
-    list[str],
-    list[str],
-]:
-    """Generate unique coordinates using coordinates and symmetry positions."""
-    coords_out: list[NDArray] = []
-    labels_out: list[str] = []
-    wyckoffs_out: list[str] = []
+def _verify_composition_occupancies(
+    coord_to_composition: dict[tuple[float, float, float], Composition],
+    check_occupancies: bool,
+    occupancy_tolerance: float,
+) -> dict[tuple[float, float, float], Composition]:
+    # Check occupancy
 
-    labels = labels or {}
-    wyckoff_letters = wyckoff_letters or {}
+    if not check_occupancies:
+        return coord_to_composition
 
-    for tmp_coord in coords:
-        for op in symmetry_operations:
-            coord = op.operate(tmp_coord)
-            coord = np.array([i - math.floor(i) for i in coord])
-            if not in_coord_list_pbc(coords_out, coord, atol=site_tolerance):
-                coords_out.append(coord)
-                labels_out.append(labels.get(tmp_coord, "no_label"))
-                wyckoffs_out.append(wyckoff_letters.get(tmp_coord, "Not Parsed"))
-
-    return coords_out, labels_out, wyckoffs_out
-
-
-def _parse_oxidation_states(cif_block: CifBlock) -> dict[str, float] | None:
-    try:
-        oxi_states = {
-            cif_block["_atom_type_symbol"][i]: str2float(
-                cif_block["_atom_type_oxidation_number"][i]
+    for key, composition in coord_to_composition.items():
+        total_occupancy = sum(composition.values())
+        if total_occupancy > occupancy_tolerance:
+            LOGGER.warning(
+                f"Occupancy of {composition} is {total_occupancy} and exceeds the set tolerance of {occupancy_tolerance}. "
+                "Rescaling total composition occupancy to 1.0."
             )
-            for i in range(len(cif_block["_atom_type_symbol"]))
-        }
-        # Attempt to strip oxidation state from _atom_type_symbol
-        # in case the label does not contain an oxidation state
-        for idx, symbol in enumerate(cif_block["_atom_type_symbol"]):
-            oxi_states[re.sub(r"\d?[\+,\-]?$", "", symbol)] = str2float(
-                cif_block["_atom_type_oxidation_number"][idx]
-            )
+        if total_occupancy > 1.0:
+            coord_to_composition[key] = composition / total_occupancy
 
-    except (ValueError, KeyError):
-        oxi_states = None
-    return oxi_states
-
-
-def get_matching_coordinate(
-    coord_to_species: dict[tuple[float, float, float], Composition],
-    coord: tuple[float, float, float],
-    symmetry_operations: list[SymmOp],
-    site_tolerance: float,
-) -> tuple[float, float, float] | Literal[False]:
-    """Find site by coordinate."""
-    coords: list[tuple[float, float, float]] = list(coord_to_species.keys())
-    for op in symmetry_operations:
-        frac_coord = op.operate(coord)
-        indices: NDArray = find_in_coord_list_pbc(
-            coords,
-            frac_coord,
-            atol=site_tolerance,
-        )
-        if len(indices) > 0:
-            return coords[indices[0]]
-    return False
-
-
-def get_num_implicit_hydrogens(symbol: str) -> int:
-    """Get number of implicit hydrogens."""
-    num_h = {"Wat": 2, "wat": 2, "O-H": 1}
-    return num_h.get(symbol[:3], 0)
+    return coord_to_composition
 
 
 def check(
-    cif_file: CifFile,
+    cif_block: CifBlock,
     structure: Structure,
     composition_tolerance: float,
 ) -> str | None:
@@ -473,25 +398,23 @@ def check(
         str | None: If any check fails, return a human-readable str for the
             reason (e.g., which elements are missing). None if all checks pass.
     """
-    cif_as_dict = cif_file.as_dict()
-    head_key = next(iter(cif_as_dict))
 
     cif_formula = None
     for key in ("_chemical_formula_sum", "_chemical_formula_structural"):
-        if cif_as_dict[head_key].get(key):
-            cif_formula = cif_as_dict[head_key][key]
+        if cif_block.get(key):
+            cif_formula = cif_block[key]
             break
 
     # In case of missing CIF formula keys, get non-stoichiometric formula from
     # unique sites and skip relative stoichiometry check (added in gh-3628)
     check_stoichiometry = True
-    if cif_formula is None and cif_as_dict[head_key].get("_atom_site_type_symbol"):
+    if cif_formula is None and cif_block.get("_atom_site_type_symbol"):
         check_stoichiometry = False
-        cif_formula = " ".join(cif_as_dict[head_key]["_atom_site_type_symbol"])
+        cif_formula = " ".join(cif_block["_atom_site_type_symbol"])
 
     try:
         cif_composition = Composition(cif_formula)
-    except Exception as exc:
+    except ValueError as exc:
         return f"Cannot determine chemical composition from CIF! {exc}"
 
     try:
@@ -544,7 +467,7 @@ if __name__ == "__main__":
 
     cifs = pl.read_parquet("data/icsd/cif/icsd_000.parquet").select("cif").to_series()
 
-    cif = cifs[9]
+    cif = cifs[0]
     print(cif)
 
     cif_file = CifFile.from_str(cif)
@@ -556,7 +479,12 @@ if __name__ == "__main__":
     parsed_byparser = SpacegroupAnalyzer(parsed_byparser).get_symmetrized_structure()
     print("Parsed by parser:")
     print(parsed_byparser)
+    print("Equivalent indices of final structure:", parsed_byparser.equivalent_indices)
+
+    print("-" * 120)
+    print("Parsed by function:")
 
     parsed_byfunc = parse_cif(cif_block)
-    print("Parsed by function:")
     print(parsed_byfunc)
+
+    print("Equivalent indices of final structure:", parsed_byfunc.equivalent_indices)

@@ -1,4 +1,3 @@
-from logging import WARNING, getLogger
 from typing import Literal, cast
 
 import numpy as np
@@ -7,10 +6,10 @@ from pymatgen.core.operations import MagSymmOp
 from pymatgen.symmetry.maggroups import MagneticSpaceGroup
 
 from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.logger import LOGGER as PARSER_LOGGER
 from material_database.cif.parsing.utils import str2float
 
-LOGGER = getLogger(__name__)
-LOGGER.setLevel(WARNING)
+LOGGER = PARSER_LOGGER.getChild("magnetic_cif")
 
 
 def is_magcif(cif_block: CifBlock) -> bool:

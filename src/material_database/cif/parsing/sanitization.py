@@ -1,12 +1,11 @@
 import math
 import re
-from logging import WARNING, getLogger
 
 from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.logger import LOGGER as PARSER_LOGGER
 from material_database.cif.parsing.utils import str2float
 
-LOGGER = getLogger(__name__)
-LOGGER.setLevel(WARNING)
+LOGGER = PARSER_LOGGER.getChild("sanitization")
 
 
 def sanitize_cif_block(

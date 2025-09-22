@@ -1,13 +1,12 @@
 from inspect import getfullargspec
-from logging import WARNING, getLogger
 
 from pymatgen.core.lattice import Lattice
 
 from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.logger import LOGGER as PARSER_LOGGER
 from material_database.cif.parsing.utils import str2float
 
-LOGGER = getLogger(__name__)
-LOGGER.setLevel(WARNING)
+LOGGER = PARSER_LOGGER.getChild("lattice")
 
 
 def get_lattice(
@@ -81,14 +80,13 @@ def get_lattice_no_exception(
     return getattr(Lattice, lattice_type)(*(lengths + angles))
 
 
-def check_min_lattice_thickness(lattice: Lattice | None, min_thickness: float) -> None:
-    if lattice is not None:
-        thickness = [
-            lattice.d_hkl((1, 0, 0)),
-            lattice.d_hkl((0, 1, 0)),
-            lattice.d_hkl((0, 0, 1)),
-        ]
-        if any(t < min_thickness for t in thickness):
-            raise ValueError(
-                f"{thickness=} Å below threshold, double check your structure."
-            )
+def passes_minimal_lattice_thickness_check(
+    lattice: Lattice, minimal_thickness: float
+) -> bool:
+    thickness = [
+        lattice.d_hkl((1, 0, 0)),
+        lattice.d_hkl((0, 1, 0)),
+        lattice.d_hkl((0, 0, 1)),
+    ]
+
+    return not any(t < minimal_thickness for t in thickness)

@@ -1,10 +1,8 @@
-from logging import WARNING, getLogger
-
 from material_database.cif.parsing.block import CifBlock
+from material_database.cif.parsing.logger import LOGGER as PARSER_LOGGER
 from material_database.cif.parsing.sanitization import sanitize_cif_block
 
-LOGGER = getLogger(__name__)
-LOGGER.setLevel(WARNING)
+LOGGER = PARSER_LOGGER.getChild("magnetic")
 
 
 def sanitize_magnetic_cif_block(cif_block: CifBlock) -> CifBlock:
