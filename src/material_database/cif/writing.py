@@ -54,11 +54,15 @@ def get_cif(
             ]
         )
     )
+
     get_atom_site_cif_string(
         symmetrized_structure.equivalent_sites,
-        symmetrized_structure.wyckoff_letters,
-        refined_structure.composition,
-        blocks,
+        wyckoff_letters=[
+            symmetrized_structure.wyckoff_letters[i[0]]
+            for i in symmetrized_structure.equivalent_indices
+        ],
+        composition=refined_structure.composition,
+        blocks=blocks,
     )
     loops.append(["_atom_type_symbol", "_atom_type_oxidation_number"])
     loops.append(
@@ -155,6 +159,7 @@ def get_atom_site_cif_string(
         )
         for sites, wyck in zip(equivalent_sites, wyckoff_letters)
     ]
+
     for site, mult, wyckoff in sorted(
         unique_sites,
         key=lambda t: (

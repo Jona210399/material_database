@@ -32,7 +32,7 @@ from material_database.cif.parsing.logger import (
     enable_console_logging,
     remove_file_handler,
 )
-from material_database.cif.parsing.magnetic import parse_magnetic_cif
+from material_database.cif.parsing.magnetic import parse_magnetic_cif_block
 from material_database.cif.parsing.magnetic_cif import (
     is_magcif,
     is_magcif_incommensurate,
@@ -64,10 +64,28 @@ class ParsingSettings:
     log_to_console: bool = True
 
 
-def parse_cif(
+def parse_cif_file(
+    cif_file: CifFile,
+    parsing_settings: ParsingSettings = ParsingSettings(),
+) -> list[Structure | SymmetrizedStructure | None]:
+    """Parse a CifFile into a list of pymatgen Structures or SymmetrizedStructures.
+    If a CifBlock cant be parsed, None is returned."""
+
+    structures: list[Structure | SymmetrizedStructure | None] = []
+    for cif_block in cif_file.data.values():
+        structure = parse_cif_block(cif_block, parsing_settings)
+        structures.append(structure)
+
+    return structures
+
+
+def parse_cif_block(
     cif_block: CifBlock,
     parsing_settings: ParsingSettings = ParsingSettings(),
-) -> list[Structure]:
+) -> Structure | SymmetrizedStructure | None:
+    """Parse a CIF block into a pymatgen Structure or SymmetrizedStructure.
+    If the CifBlock cant be parsed, return None."""
+
     if parsing_settings.log_to_console:
         enable_console_logging()
     else:
@@ -79,24 +97,23 @@ def parse_cif(
         remove_file_handler()
 
     if is_magcif(cif_block):
-        return parse_magnetic_cif(cif_block, parsing_settings)
+        return parse_magnetic_cif_block(cif_block, parsing_settings)
 
     if is_magcif_incommensurate(cif_block):
         raise NotImplementedError("Incommensurate magnetic structures not supported.")
 
-    return _parse_standard_cif(cif_block, parsing_settings)
+    return _parse_standard_cif_block(cif_block, parsing_settings)
 
 
-def _parse_standard_cif(
+def _parse_standard_cif_block(
     cif_block: CifBlock, parsing_settings: ParsingSettings
-) -> Structure | SymmetrizedStructure:
+) -> Structure | SymmetrizedStructure | None:
     if parsing_settings.symmetrized and parsing_settings.primitive:
         raise ValueError("Cannot set both symmetrized and primitive to True.")
 
-    try:
-        parsing_result = _parse_raw_cif(cif_block, parsing_settings)
-    except ValueError as exc:
-        LOGGER.warning(f"Error parsing CIF block: {exc}")
+    parsing_result = _parse_raw_cif(cif_block, parsing_settings)
+
+    if parsing_result is None:
         return None
 
     structure = _build_structure(
@@ -140,19 +157,21 @@ def _parse_raw_cif(
 
     lattice = get_lattice(cif_block)
     if lattice is None:
-        raise ValueError("Could not parse lattice from CIF block.")
+        LOGGER.warning("Could not parse lattice from CIF block. Returning None.")
+        return None
 
     if not passes_minimal_lattice_thickness_check(
         lattice, parsing_settings.min_lattice_thickness
     ):
-        raise ValueError(
-            f"Lattice thickness is below the minimum threshold of {parsing_settings.min_lattice_thickness}."
+        LOGGER.warning(
+            f"Lattice thickness below minimum threshold of {parsing_settings.min_lattice_thickness}, likely an error in CIF file. Returning None."
         )
+        return None
 
     spacegroup_infos = get_spacegroup_information(cif_block)
 
     if spacegroup_infos is None:
-        LOGGER.warning("No spacegroup information found, assuming P1.")
+        LOGGER.warning("No spacegroup information found, assuming Spacegroup P1.")
         spacegroup = SpaceGroup.from_int_number(1)
         spacegroup_operations = spacegroup.symmetry_ops
 
@@ -162,7 +181,8 @@ def _parse_raw_cif(
     compositions_and_atom_sites = parse_compositions(cif_block)
 
     if compositions_and_atom_sites is None:
-        raise ValueError("Could not parse atom sites into compositions.")
+        LOGGER.warning("Could not parse atom sites into compositions. Returning None.")
+        return None
 
     compositions, atom_sites, site_properties = compositions_and_atom_sites
 
@@ -176,7 +196,8 @@ def _parse_raw_cif(
     fractional_coordinates = parse_fractional_coordinates(cif_block, len(compositions))
 
     if fractional_coordinates is None:
-        raise ValueError("Could not parse fractional coordinates.")
+        LOGGER.warning("Could not parse fractional coordinates. Returning None.")
+        return None
 
     coord_to_composition: dict[tuple[float, float, float], Composition] = defaultdict(
         Composition
@@ -356,8 +377,6 @@ def _verify_composition_occupancies(
     check_occupancies: bool,
     occupancy_tolerance: float,
 ) -> dict[tuple[float, float, float], Composition]:
-    # Check occupancy
-
     if not check_occupancies:
         return coord_to_composition
 
@@ -467,24 +486,23 @@ if __name__ == "__main__":
 
     cifs = pl.read_parquet("data/icsd/cif/icsd_000.parquet").select("cif").to_series()
 
-    cif = cifs[0]
+    cif = cifs[9]
     print(cif)
 
     cif_file = CifFile.from_str(cif)
-    print("#" * 120)
-
-    cif_block = list(cif_file.data.values())[0]
 
     parsed_byparser = CifParser(StringIO(cif)).parse_structures()[0]
     parsed_byparser = SpacegroupAnalyzer(parsed_byparser).get_symmetrized_structure()
     print("Parsed by parser:")
     print(parsed_byparser)
-    print("Equivalent indices of final structure:", parsed_byparser.equivalent_indices)
 
     print("-" * 120)
     print("Parsed by function:")
 
-    parsed_byfunc = parse_cif(cif_block)
+    parsed_byfunc = parse_cif_file(cif_file)
     print(parsed_byfunc)
 
-    print("Equivalent indices of final structure:", parsed_byfunc.equivalent_indices)
+    from material_database.cif.writing import structure_to_cif
+
+    cif_str = structure_to_cif(parsed_byfunc[0])
+    print(cif_str)
