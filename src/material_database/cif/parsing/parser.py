@@ -58,7 +58,7 @@ class ParsingSettings:
     min_lattice_thickness: float = 0.01
     primitive: bool = False
     symmetrized: bool = True
-    check_occupancies: bool = False
+    check_occupancies: bool = True
     check_cif: bool = True
     log_file: str | None = None
     log_to_console: bool = True
@@ -134,7 +134,6 @@ def _parse_standard_cif_block(
         )
         if cif_failure_reason is not None:
             LOGGER.warning(cif_failure_reason)
-            print("failure reason:", cif_failure_reason)
 
     return structure
 
