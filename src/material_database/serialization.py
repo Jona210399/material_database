@@ -6,19 +6,23 @@ from pymatgen.symmetry.structure import SymmetrizedStructure
 from material_database.cif.writing import analyzer_to_cif
 
 
-def remove_empty_fields(d: dict) -> dict:
-    if not isinstance(d, dict):
-        return d
-
-    new_dict = {}
-    for k, v in d.items():
-        if isinstance(v, dict):
+def remove_empty_fields(obj):
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
             cleaned = remove_empty_fields(v)
-            if cleaned:
+            # Only keep non-empty values
+            if cleaned not in ({}, [], "", None):
                 new_dict[k] = cleaned
-        else:
-            new_dict[k] = v
-    return new_dict
+        return new_dict
+
+    elif isinstance(obj, list):
+        new_list = [remove_empty_fields(v) for v in obj]
+        # Drop empty items from lists
+        return [v for v in new_list if v not in ({}, [], "", None)]
+
+    else:
+        return obj
 
 
 def serialize_symmetrized_structure(structure: SymmetrizedStructure) -> dict:
