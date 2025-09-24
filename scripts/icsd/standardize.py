@@ -47,7 +47,7 @@ def process_entries(cifs: list[str]) -> list[dict]:
 
 
 def process_entries_concurrently(cifs: list[str]) -> list[dict]:
-    with ProcessPoolExecutor(max_workers=6) as executor:
+    with ProcessPoolExecutor() as executor:
         symmetrized_structures = list(
             tqdm(
                 executor.map(cif_to_serialized_symmetrized_structure, cifs),  # ordered
@@ -70,14 +70,12 @@ def main():
 
     cifs.write_parquet(source / "cif" / "icsd_000.parquet", mkdir=True)
 
-    symmetrized_structures = process_entries(
+    symmetrized_structures = process_entries_concurrently(
         cifs.select(pl.col(ColumnNames.CIF)).to_series()
     )
 
-    symmetrized_structures = (
+    symmetrized_structures = cifs.select(pl.col(ColumnNames.ID)).with_columns(
         pl.Series(name=ColumnNames.SYMMETRIZED_STRUCTURE, values=symmetrized_structures)
-        .to_frame()
-        .with_columns(cifs.select(pl.col(ColumnNames.ID)))
     )
 
     symmetrized_structures = symmetrized_structures.drop_nulls()
