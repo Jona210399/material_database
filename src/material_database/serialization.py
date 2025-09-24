@@ -39,9 +39,15 @@ def serialize_symmetrized_structure(structure: SymmetrizedStructure) -> dict:
 
 def structure_to_serialized_symmetrized_structure_and_cif(
     structure: Structure,
-) -> tuple[dict, str]:
-    analyzer = SpacegroupAnalyzer(structure)
-    symmetrized_structure = analyzer.get_symmetrized_structure()
+) -> tuple[dict, str] | tuple[None, None]:
+    try:
+        analyzer = SpacegroupAnalyzer(structure)
+        symmetrized_structure = analyzer.get_symmetrized_structure()
+
+    except ValueError:
+        # Symmetry detection can fail for some structures
+        return None, None
+
     symmetrized_structure = serialize_symmetrized_structure(symmetrized_structure)
     cif = analyzer_to_cif(analyzer=analyzer)
 
