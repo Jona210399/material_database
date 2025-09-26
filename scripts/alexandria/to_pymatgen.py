@@ -16,7 +16,7 @@ from material_database.serialization import (
 
 def process_entry(
     entry: ComputedStructureEntry,
-) -> tuple[dict, str]:
+) -> tuple[dict, str] | tuple[None, None]:
     return structure_to_serialized_symmetrized_structure_and_cif(
         structure=entry.structure
     )
@@ -57,6 +57,10 @@ def main():
     cif_destination = Path.cwd() / "data" / "alexandria" / "cif"
 
     for file in tqdm(sorted(source.glob("*.parquet"))):
+        if (cif_destination / file.name).exists():
+            print(f"Skipping {file.name}, already processed.")
+            continue
+
         data = pl.read_parquet(file)
         data = data.with_columns(
             pl.col("entries").map_elements(
@@ -73,14 +77,14 @@ def main():
                 name=ColumnNames.SYMMETRIZED_STRUCTURE,
                 values=symmetrized_structures,
             ),
-        ).drop("entries").write_parquet(pymatgen_destination / file.name)
+        ).drop("entries").drop_nulls().write_parquet(pymatgen_destination / file.name)
 
         data.with_columns(
             pl.Series(
                 name=ColumnNames.CIF,
                 values=cifs,
             ),
-        ).drop("entries").write_parquet(cif_destination / file.name)
+        ).drop("entries").drop_nulls().write_parquet(cif_destination / file.name)
 
 
 if __name__ == "__main__":
