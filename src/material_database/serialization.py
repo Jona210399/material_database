@@ -4,6 +4,7 @@ from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.symmetry.structure import SymmetrizedStructure
 
 from material_database.cif.writing import analyzer_to_cif
+from material_database.types_ import SerializedSymmetrizedStructure
 
 
 def remove_empty_fields(obj):
@@ -25,7 +26,9 @@ def remove_empty_fields(obj):
         return obj
 
 
-def serialize_symmetrized_structure(structure: SymmetrizedStructure) -> dict:
+def serialize_symmetrized_structure(
+    structure: SymmetrizedStructure,
+) -> SerializedSymmetrizedStructure:
     d = structure.as_dict()
     d["equivalent_positions"] = (
         d["equivalent_positions"].tolist()
@@ -39,7 +42,7 @@ def serialize_symmetrized_structure(structure: SymmetrizedStructure) -> dict:
 
 def structure_to_serialized_symmetrized_structure_and_cif(
     structure: Structure,
-) -> tuple[dict, str] | tuple[None, None]:
+) -> tuple[SerializedSymmetrizedStructure, str] | tuple[None, None]:
     try:
         analyzer = SpacegroupAnalyzer(structure)
         symmetrized_structure = analyzer.get_symmetrized_structure()
