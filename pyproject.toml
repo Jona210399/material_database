@@ -19,6 +19,7 @@ dependencies = [
     "pymatgen>=2025.5.28",
     "python-dotenv>=1.1.1",
     "tqdm>=4.67.1",
+    "xrdsim",
 ]
 
 [project.scripts]
@@ -27,3 +28,6 @@ material-database = "material_database:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+xrdsim = { git = "https://github.com/Jona210399/xrdsim" }
