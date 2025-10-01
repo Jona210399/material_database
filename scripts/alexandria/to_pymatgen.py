@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from material_database.alexandria.parse import alexandria_entry_to_pymatgen
 from material_database.constants import ColumnNames
+from material_database.iterate import DatabaseFileIterator
 from material_database.serialization import (
     structure_to_serialized_symmetrized_structure_and_cif,
 )
@@ -56,12 +57,15 @@ def main():
     pymatgen_destination = Path.cwd() / "data" / "alexandria" / "pymatgen"
     cif_destination = Path.cwd() / "data" / "alexandria" / "cif"
 
-    for file in tqdm(sorted(source.glob("*.parquet"))):
+    for file, data in tqdm(
+        DatabaseFileIterator(source=source), desc="Processing files"
+    ):
         if (cif_destination / file.name).exists():
             print(f"Skipping {file.name}, already processed.")
             continue
 
-        data = pl.read_parquet(file)
+        data = data.collect()
+
         data = data.with_columns(
             pl.col("entries").map_elements(
                 alexandria_entry_to_pymatgen, return_dtype=pl.Object
