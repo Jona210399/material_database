@@ -5,3 +5,6 @@ class ColumnNames:
 
     PEAK_TWO_THETAS = "peak_two_thetas"
     PEAK_INTENSITIES = "peak_intensities"
+    INTENSITIES = "intensities"
+
+    ROBOCRYS = "robocrys"

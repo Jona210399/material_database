@@ -18,6 +18,7 @@ dependencies = [
     "pydantic>=2.11.5",
     "pymatgen>=2025.5.28",
     "python-dotenv>=1.1.1",
+    "robocrys>=0.2.11",
     "tqdm>=4.67.1",
     "xrdsim",
 ]
