@@ -59,12 +59,12 @@ def main():
             pl.DataFrame(
                 patterns,
                 schema=SerializedPXRDGaussianScherrerProfile.get_schema(
-                    intensities_shape=(len(patterns[0]["intensities"]),)
+                    intensities_shape=(len(patterns[0][ColumnNames.INTENSITIES]),)
                 ),
             )
         )
 
-        num_invalid = data.select(pl.col("intensities")).null_count().item()
+        num_invalid = data.select(pl.col(ColumnNames.INTENSITIES)).null_count().item()
         if num_invalid > 0:
             print(f"Found {num_invalid} invalid patterns in {file.name}")
 
