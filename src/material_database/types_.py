@@ -50,3 +50,29 @@ class SerializedPXRDGaussianScherrerProfile(TypedDict):
                 "crystallite_size": pl.Float32,
             }
         )
+
+
+class SerializedMatBindGraph(TypedDict):
+    """
+    A TypedDict representing the serialized form of a MatBind graph.
+    """
+
+    node_features: list[list[float]]
+    edge_index: list[list[int]]
+    edge_attr: list[list[float]]
+
+    @classmethod
+    def get_schema(
+        cls,
+        num_node_features: int,
+        num_edge_features: int,
+    ) -> pl.Schema:
+        return pl.Schema(
+            {
+                "node_features": pl.List(
+                    pl.Array(pl.Float32, shape=(num_node_features,))
+                ),
+                "edge_index": pl.Array(pl.List(pl.Int32), shape=(2,)),
+                "edge_attr": pl.List(pl.Array(pl.Float32, shape=(num_edge_features,))),
+            }
+        )
